@@ -1,35 +1,91 @@
 services:
+  # PostgreSQL データベース用コンテナ
   postgres:
+    # PostgreSQL 16 の公式Dockerイメージを使用
     image: postgres:16
+
+    # 起動するコンテナ名
     container_name: monitor_portal_postgres
+
+    # PostgreSQLの初期設定
+    # 初回起動時に、以下のDB・ユーザー・パスワードが作成される
     environment:
-      POSTGRES_DB: monitor_db
-      POSTGRES_USER: monitor_user
-      POSTGRES_PASSWORD: monitor_pass
+      # 作成するデータベース名
+      POSTGRES_DB: ${POSTGRES_DB}
+
+      # PostgreSQLに接続するユーザー名
+      POSTGRES_USER: ${POSTGRES_USER}
+
+      # PostgreSQLに接続するパスワード
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    # PostgreSQLのデータを永続化する設定
+    # コンテナを削除しても、DBデータは postgres_data に残る
+    # /var/lib/postgresql/data : PostgreSQLコンテナの中のディレクトリ
+    # postgres_data : Dockerが管理するボリューム名
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+    # ホスト側の5432番ポートを、コンテナ側の5432番ポートに接続
+    # Ubuntu本体や外部ツールからPostgreSQLへ接続したい場合に使う
     ports:
       - "5432:5432"
+
+    # PostgreSQLが本当に接続可能な状態になったか確認する設定
+    # webコンテナを起動する前に、DBの準備完了を判定するために使う
+    # healthcheckはDockerの機能。pg_isreadyはPostgresのコマンド
     healthcheck:
+      # monitor_user / monitor_db でPostgreSQLに接続できるか確認
       test: ["CMD-SHELL", "pg_isready -U monitor_user -d monitor_db"]
+
+      # 5秒ごとに確認する
       interval: 5s
+
+      # 1回の確認を5秒でタイムアウトする
       timeout: 5s
+
+      # 最大20回まで再試行する
       retries: 20
+
+      # コンテナ起動後、最初の10秒は猶予時間とする
       start_period: 10s
 
+  # FastAPI Webアプリ用コンテナ
   web:
+    # 現在のディレクトリにある Dockerfile を使ってイメージを作成
     build: .
+
+    # 起動するコンテナ名
     container_name: monitor_portal_web
+
+    # ホスト側の8000番ポートを、コンテナ側の8000番ポートに接続
+    # http://サーバーIP:8000/docsは、FastAPIのAPIドキュメント画面。main.pyで定義
     ports:
       - "8000:8000"
+
+    # FastAPIアプリに渡す環境変数
     environment:
+      # PostgreSQLへの接続文字列
+      # Docker Compose内では、DBの接続先ホスト名は localhost ではなく postgres
       DATABASE_URL: postgresql://monitor_user:monitor_pass@postgres:5432/monitor_db
+
+    # webコンテナは、postgresコンテナが healthy になってから起動する
+    # これにより「database system is starting up」エラーを防ぐ
     depends_on:
       postgres:
         condition: service_healthy
+
+    # ホスト側の現在のフォルダを、コンテナ内の /app にマウント
+    # Ubuntu側で編集した app/main.py などが、コンテナ内にも反映される
     volumes:
       - .:/app
+
+    # FastAPIをUvicornで起動するコマンド
+    # app/main.py の中にある app = FastAPI() を起動する
+    # --reload は開発用で、ファイル変更時に自動再起動する
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
+# Dockerボリュームの定義
+# PostgreSQLのデータ保存用
 volumes:
   postgres_data:
