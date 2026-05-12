@@ -1,6 +1,11 @@
-from fastapi import APIRouter, Depends, Form, Request, UploadFile, File
+import csv
+import io
+from collections import defaultdict
+
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -30,21 +35,46 @@ def devices_page(
     if keyword:
         search = f"%{keyword}%"
         query = query.filter(
-            (Device.hostname.ilike(search)) |
-            (Device.ip_address.ilike(search)) |
-            (Device.subnet.ilike(search)) |
-            (Device.role.ilike(search)) |
-            (Device.memo.ilike(search))
+            or_(
+                Device.hostname.ilike(search),
+                Device.ip_address.ilike(search),
+                Device.subnet.ilike(search),
+                Device.role.ilike(search),
+                Device.memo.ilike(search),
+            )
         )
 
-    devices = query.order_by(Device.id.asc()).all()
+    devices = query.order_by(Device.subnet.asc(), Device.ip_address.asc()).all()
+
+    # サブネットごとに機器をまとめる
+    grouped_devices = defaultdict(list)
+
+    for device in devices:
+        subnet_name = device.subnet or "未設定"
+        grouped_devices[subnet_name].append(device)
+
+    # Jinja2で扱いやすい形にする
+    subnet_groups = [
+        {
+            "subnet": subnet,
+            "devices": items,
+            "count": len(items)
+        }
+        for subnet, items in grouped_devices.items()
+    ]
+
+    total_devices = len(devices)
+    total_subnets = len(subnet_groups)
 
     return templates.TemplateResponse(
         request,
         "devices.html",
         {
+            "keyword": keyword or "",
             "devices": devices,
-            "keyword": keyword or ""
+            "subnet_groups": subnet_groups,
+            "total_devices": total_devices,
+            "total_subnets": total_subnets,
         }
     )
 
@@ -67,13 +97,11 @@ def create_device_from_form(
     ).first()
 
     if existing_device:
-        # 既存IPの場合は更新する
         existing_device.hostname = hostname
         existing_device.subnet = subnet or None
         existing_device.role = role or None
         existing_device.memo = memo or None
     else:
-        # 未登録IPの場合は新規追加する
         new_device = Device(
             hostname=hostname,
             ip_address=ip_address,
@@ -112,6 +140,56 @@ def delete_device_from_form(
     )
 
 
+@router.post("/devices/update/{device_id}")
+def update_device_from_form(
+    device_id: int,
+    hostname: str = Form(...),
+    ip_address: str = Form(...),
+    subnet: str = Form(""),
+    role: str = Form(""),
+    memo: str = Form(""),
+    db: Session = Depends(get_db)
+):
+    """
+    HTML画面から機器情報を更新する
+    """
+
+    device = db.query(Device).filter(Device.id == device_id).first()
+
+    if not device:
+        return RedirectResponse(
+            url="/ui/devices",
+            status_code=303
+        )
+
+    # IPアドレス変更時、他の機器と重複していないか確認
+    existing_device = db.query(Device).filter(
+        Device.ip_address == ip_address,
+        Device.id != device_id
+    ).first()
+
+    if existing_device:
+        # ひとまず画面に戻す
+        # 後でエラーメッセージ表示を追加可能
+        return RedirectResponse(
+            url="/ui/devices",
+            status_code=303
+        )
+
+    device.hostname = hostname
+    device.ip_address = ip_address
+    device.subnet = subnet or None
+    device.role = role or None
+    device.memo = memo or None
+
+    db.commit()
+
+    return RedirectResponse(
+        url="/ui/devices",
+        status_code=303
+    )
+    
+
 @router.post("/devices/import-csv")
 async def import_csv_from_form(
     file: UploadFile = File(...),
@@ -119,20 +197,13 @@ async def import_csv_from_form(
 ):
     """
     HTML画面からCSVをインポートする
-
-    形式:
-    hostname,ip_address,subnet,role,memo
     """
-
-    import csv
-    import io
 
     content = await file.read()
 
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError:
-        # Windows Excelで作ったCSVを想定してCP932も試す
         text = content.decode("cp932")
 
     reader = csv.DictReader(io.StringIO(text))

@@ -1,13 +1,12 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.database import Base, engine
 from app import models
-from app.routers import devices, ui
+from app.routers import devices
+from app.routers import ui
 
 
-
-# models.py に定義したテーブルをDBに作成する
-# すでに存在する場合は何もしない
 Base.metadata.create_all(bind=engine)
 
 
@@ -18,11 +17,15 @@ app = FastAPI(
 )
 
 
+# CSS / JS / 画像などの静的ファイルを公開する
+# 例: /static/css/devices.css
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
 @app.get("/")
 def read_root():
     return {"message": "Monitor Portal API is running"}
 
 
-# devices.py のAPIを読み込む
 app.include_router(devices.router)
 app.include_router(ui.router)

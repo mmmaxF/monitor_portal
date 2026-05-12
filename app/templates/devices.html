@@ -2,247 +2,195 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Monitor Portal - IP台帳</title>
-    <style>
-        body {
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            margin: 0;
-            background: #f3f4f6;
-            color: #111827;
-        }
-
-        header {
-            background: #111827;
-            color: white;
-            padding: 18px 32px;
-        }
-
-        header h1 {
-            margin: 0;
-            font-size: 24px;
-        }
-
-        header p {
-            margin: 6px 0 0;
-            color: #d1d5db;
-            font-size: 14px;
-        }
-
-        main {
-            padding: 24px 32px;
-        }
-
-        .card {
-            background: white;
-            border-radius: 14px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
-        }
-
-        .card h2 {
-            margin-top: 0;
-            font-size: 18px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 10px;
-        }
-
-        form.inline {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        input[type="text"],
-        input[type="file"] {
-            padding: 9px 10px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            font-size: 14px;
-        }
-
-        input[name="hostname"] {
-            min-width: 180px;
-        }
-
-        input[name="ip_address"] {
-            min-width: 150px;
-        }
-
-        input[name="memo"] {
-            min-width: 240px;
-        }
-
-        button,
-        .button-link {
-            border: none;
-            border-radius: 8px;
-            padding: 9px 14px;
-            background: #2563eb;
-            color: white;
-            font-size: 14px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-        }
-
-        button:hover,
-        .button-link:hover {
-            background: #1d4ed8;
-        }
-
-        .danger {
-            background: #dc2626;
-        }
-
-        .danger:hover {
-            background: #b91c1c;
-        }
-
-        .secondary {
-            background: #4b5563;
-        }
-
-        .secondary:hover {
-            background: #374151;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-            font-size: 14px;
-        }
-
-        th,
-        td {
-            border-bottom: 1px solid #e5e7eb;
-            padding: 10px;
-            text-align: left;
-            vertical-align: top;
-        }
-
-        th {
-            background: #f9fafb;
-            font-weight: 600;
-        }
-
-        tr:hover {
-            background: #f9fafb;
-        }
-
-        .actions {
-            white-space: nowrap;
-        }
-
-        .top-actions {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        .muted {
-            color: #6b7280;
-            font-size: 13px;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 3px 8px;
-            border-radius: 999px;
-            background: #e5e7eb;
-            font-size: 12px;
-        }
-    </style>
+    <title>Monitor Portal - Network Logical Map</title>
+    <link rel="stylesheet" href="/static/css/devices.css">
 </head>
 <body>
-<header>
-    <h1>Monitor Portal</h1>
-    <p>IP台帳・監視ポータル</p>
-</header>
+    <main class="page">
+        <header class="hero">
+            <div>
+                <p class="eyebrow">MONITOR PORTAL</p>
+                <h1 class="hero-title">Network Logical Map</h1>
+                <p class="hero-subtitle">
+                    IP台帳から自動生成したサブネット別の論理構成図です。
+                </p>
+            </div>
 
-<main>
-    <section class="card">
-        <h2>検索・CSV操作</h2>
+            <div class="hero-actions">
+                <a class="button-link" href="/docs" target="_blank">API Docs</a>
+                <a class="button-link secondary" href="/devices/export-csv">CSV Export</a>
+            </div>
+        </header>
 
-        <div class="top-actions">
-            <form class="inline" method="get" action="/ui/devices">
-                <input type="text" name="keyword" value="{{ keyword }}" placeholder="ホスト名 / IP / メモ検索">
-                <button type="submit">検索</button>
-                <a class="button-link secondary" href="/ui/devices">クリア</a>
+        <section class="summary">
+            <div class="summary-card">
+                <div class="summary-number">{{ total_subnets }}</div>
+                <div class="summary-label">Subnets</div>
+            </div>
+
+            <div class="summary-card">
+                <div class="summary-number">{{ total_devices }}</div>
+                <div class="summary-label">Devices</div>
+            </div>
+
+            <div class="summary-card">
+                <div class="summary-number">{{ keyword if keyword else "All" }}</div>
+                <div class="summary-label">Current Filter</div>
+            </div>
+        </section>
+
+        <section class="control-card">
+            <div class="control-grid">
+                <div>
+                    <h2>Search</h2>
+                    <form class="inline-form" method="get" action="/ui/devices">
+                        <input type="text" name="keyword" value="{{ keyword }}" placeholder="ホスト名 / IP / サブネット / 種別 / メモ">
+                        <button type="submit">検索</button>
+                        <a class="button-link muted-button" href="/ui/devices">クリア</a>
+                    </form>
+                </div>
+
+                <div>
+                    <h2>CSV Import</h2>
+                    <form class="inline-form" method="post" action="/ui/devices/import-csv" enctype="multipart/form-data">
+                        <input type="file" name="file" accept=".csv">
+                        <button type="submit">インポート</button>
+                    </form>
+                    <p class="hint">CSV形式: hostname, ip_address, subnet, role, memo</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="control-card">
+            <h2>Device Register</h2>
+
+            <form class="register-form" method="post" action="/ui/devices/create">
+                <input type="text" name="hostname" placeholder="ホスト名" required>
+                <input type="text" name="ip_address" placeholder="IPアドレス" required>
+                <input type="text" name="subnet" placeholder="サブネット 例: 192.168.1.0/24">
+                <input type="text" name="role" placeholder="種別 例: router / switch / server">
+                <input type="text" name="memo" placeholder="メモ">
+                <button type="submit">登録 / 更新</button>
             </form>
 
-            <a class="button-link" href="/devices/export-csv">CSVエクスポート</a>
-        </div>
+            <p class="hint">
+                同じIPアドレスが存在する場合は、新規登録ではなく既存データを更新します。
+            </p>
+        </section>
 
-        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 18px 0;">
+        <section class="grid">
+            {% for group in subnet_groups %}
+            <section class="subnet-card">
+                <div class="subnet-header">
+                    <div>
+                        <div class="subnet-label">SUBNET</div>
+                        <h2>{{ group.subnet }}</h2>
+                    </div>
+                    <div class="device-count">{{ group.count }} devices</div>
+                </div>
 
-        <form class="inline" method="post" action="/ui/devices/import-csv" enctype="multipart/form-data">
-            <input type="file" name="file" accept=".csv">
-            <button type="submit">CSVインポート</button>
-            <span class="muted">形式: hostname, ip_address, subnet, role, memo</span>
-        </form>
-    </section>
+                <div class="tree-line">
+                    {% for device in group.devices %}
+                    <div class="device-row">
+                        <div class="device-icon">●</div>
 
-    <section class="card">
-        <h2>機器登録</h2>
+                        <div class="device-info">
+                            <div class="device-name">{{ device.hostname }}</div>
+                            <div class="device-ip">{{ device.ip_address }}</div>
+                            {% if device.memo %}
+                            <div class="device-memo">{{ device.memo }}</div>
+                            {% endif %}
+                        </div>
 
-        <form class="inline" method="post" action="/ui/devices/create">
-            <input type="text" name="hostname" placeholder="ホスト名" required>
-            <input type="text" name="ip_address" placeholder="IPアドレス" required>
-            <input type="text" name="subnet" placeholder="サブネット">
-            <input type="text" name="role" placeholder="種別">
-            <input type="text" name="memo" placeholder="メモ">
-            <button type="submit">登録</button>
-        </form>
+                        <span class="badge badge-{{ device.role or 'default' }}">
+                            {{ device.role or "unknown" }}
+                        </span>
 
-        <p class="muted">
-            同じIPアドレスがすでに存在する場合は、新規登録ではなく更新します。
-        </p>
-    </section>
-
-    <section class="card">
-        <h2>機器一覧 <span class="badge">{{ devices|length }} 件</span></h2>
-
-        <table>
-            <thead>
-            <tr>
-                <th>ID</th>
-                <th>ホスト名</th>
-                <th>IPアドレス</th>
-                <th>サブネット</th>
-                <th>種別</th>
-                <th>メモ</th>
-                <th>操作</th>
-            </tr>
-            </thead>
-            <tbody>
-            {% for device in devices %}
-            <tr>
-                <td>{{ device.id }}</td>
-                <td>{{ device.hostname }}</td>
-                <td>{{ device.ip_address }}</td>
-                <td>{{ device.subnet or "" }}</td>
-                <td>{{ device.role or "" }}</td>
-                <td>{{ device.memo or "" }}</td>
-                <td class="actions">
-                    <form method="post" action="/ui/devices/delete/{{ device.id }}" onsubmit="return confirm('削除してよろしいですか？');">
-                        <button class="danger" type="submit">削除</button>
-                    </form>
-                </td>
-            </tr>
+                        <button
+                            class="edit-button"
+                            type="button"
+                            data-device-id="{{ device.id }}"
+                            data-hostname="{{ device.hostname }}"
+                            data-ip-address="{{ device.ip_address }}"
+                            data-subnet="{{ device.subnet or '' }}"
+                            data-role="{{ device.role or '' }}"
+                            data-memo="{{ device.memo or '' }}"
+                        >
+                            編集
+                        </button>
+                        
+                        <form class="delete-form" method="post" action="/ui/devices/delete/{{ device.id }}">
+                            <button class="delete-button" type="submit" data-device-name="{{ device.hostname }}">
+                                削除
+                            </button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
             {% endfor %}
 
-            {% if devices|length == 0 %}
-            <tr>
-                <td colspan="7" class="muted">登録データがありません。</td>
-            </tr>
+            {% if subnet_groups|length == 0 %}
+            <section class="empty-card">
+                <h2>登録データがありません</h2>
+                <p>上部のフォームまたはCSVインポートから機器を登録してください。</p>
+            </section>
             {% endif %}
-            </tbody>
-        </table>
-    </section>
-</main>
+        </section>
+
+        <div class="footer">
+            Generated from Monitor Portal Database
+        </div>
+
+        <div id="editModal" class="modal hidden">
+            <div class="modal-backdrop" data-close-modal="true"></div>
+
+            <div class="modal-panel">
+                <div class="modal-header">
+                    <div>
+                        <p class="eyebrow">EDIT DEVICE</p>
+                        <h2>機器情報を編集</h2>
+                    </div>
+
+                    <button type="button" class="modal-close" data-close-modal="true">×</button>
+                </div>
+
+                <form id="editForm" class="modal-form" method="post" action="">
+                    <label>
+                        <span>ホスト名</span>
+                        <input type="text" name="hostname" id="editHostname" required>
+                    </label>
+
+                    <label>
+                        <span>IPアドレス</span>
+                        <input type="text" name="ip_address" id="editIpAddress" required>
+                    </label>
+
+                    <label>
+                        <span>サブネット</span>
+                        <input type="text" name="subnet" id="editSubnet">
+                    </label>
+
+                    <label>
+                        <span>種別</span>
+                        <input type="text" name="role" id="editRole">
+                    </label>
+
+                    <label>
+                        <span>メモ</span>
+                        <input type="text" name="memo" id="editMemo">
+                    </label>
+
+                    <div class="modal-actions">
+                        <button type="button" class="muted-button" data-close-modal="true">キャンセル</button>
+                        <button type="submit">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </main>
+
+    <script src="/static/js/devices.js"></script>
 </body>
 </html>
