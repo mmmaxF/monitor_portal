@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Monitor Portal - IP台帳</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            background: #f3f4f6;
+            color: #111827;
+        }
+
+        header {
+            background: #111827;
+            color: white;
+            padding: 18px 32px;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+
+        header p {
+            margin: 6px 0 0;
+            color: #d1d5db;
+            font-size: 14px;
+        }
+
+        main {
+            padding: 24px 32px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 14px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+        }
+
+        .card h2 {
+            margin-top: 0;
+            font-size: 18px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 10px;
+        }
+
+        form.inline {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        input[type="text"],
+        input[type="file"] {
+            padding: 9px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        input[name="hostname"] {
+            min-width: 180px;
+        }
+
+        input[name="ip_address"] {
+            min-width: 150px;
+        }
+
+        input[name="memo"] {
+            min-width: 240px;
+        }
+
+        button,
+        .button-link {
+            border: none;
+            border-radius: 8px;
+            padding: 9px 14px;
+            background: #2563eb;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        button:hover,
+        .button-link:hover {
+            background: #1d4ed8;
+        }
+
+        .danger {
+            background: #dc2626;
+        }
+
+        .danger:hover {
+            background: #b91c1c;
+        }
+
+        .secondary {
+            background: #4b5563;
+        }
+
+        .secondary:hover {
+            background: #374151;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            font-size: 14px;
+        }
+
+        th,
+        td {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 10px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            background: #f9fafb;
+            font-weight: 600;
+        }
+
+        tr:hover {
+            background: #f9fafb;
+        }
+
+        .actions {
+            white-space: nowrap;
+        }
+
+        .top-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .muted {
+            color: #6b7280;
+            font-size: 13px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: #e5e7eb;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Monitor Portal</h1>
+    <p>IP台帳・監視ポータル</p>
+</header>
+
+<main>
+    <section class="card">
+        <h2>検索・CSV操作</h2>
+
+        <div class="top-actions">
+            <form class="inline" method="get" action="/ui/devices">
+                <input type="text" name="keyword" value="{{ keyword }}" placeholder="ホスト名 / IP / メモ検索">
+                <button type="submit">検索</button>
+                <a class="button-link secondary" href="/ui/devices">クリア</a>
+            </form>
+
+            <a class="button-link" href="/devices/export-csv">CSVエクスポート</a>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 18px 0;">
+
+        <form class="inline" method="post" action="/ui/devices/import-csv" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".csv">
+            <button type="submit">CSVインポート</button>
+            <span class="muted">形式: hostname, ip_address, subnet, role, memo</span>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>機器登録</h2>
+
+        <form class="inline" method="post" action="/ui/devices/create">
+            <input type="text" name="hostname" placeholder="ホスト名" required>
+            <input type="text" name="ip_address" placeholder="IPアドレス" required>
+            <input type="text" name="subnet" placeholder="サブネット">
+            <input type="text" name="role" placeholder="種別">
+            <input type="text" name="memo" placeholder="メモ">
+            <button type="submit">登録</button>
+        </form>
+
+        <p class="muted">
+            同じIPアドレスがすでに存在する場合は、新規登録ではなく更新します。
+        </p>
+    </section>
+
+    <section class="card">
+        <h2>機器一覧 <span class="badge">{{ devices|length }} 件</span></h2>
+
+        <table>
+            <thead>
+            <tr>
+                <th>ID</th>
+                <th>ホスト名</th>
+                <th>IPアドレス</th>
+                <th>サブネット</th>
+                <th>種別</th>
+                <th>メモ</th>
+                <th>操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for device in devices %}
+            <tr>
+                <td>{{ device.id }}</td>
+                <td>{{ device.hostname }}</td>
+                <td>{{ device.ip_address }}</td>
+                <td>{{ device.subnet or "" }}</td>
+                <td>{{ device.role or "" }}</td>
+                <td>{{ device.memo or "" }}</td>
+                <td class="actions">
+                    <form method="post" action="/ui/devices/delete/{{ device.id }}" onsubmit="return confirm('削除してよろしいですか？');">
+                        <button class="danger" type="submit">削除</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+
+            {% if devices|length == 0 %}
+            <tr>
+                <td colspan="7" class="muted">登録データがありません。</td>
+            </tr>
+            {% endif %}
+            </tbody>
+        </table>
+    </section>
+</main>
+</body>
+</html>

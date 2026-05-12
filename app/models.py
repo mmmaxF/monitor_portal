@@ -1,46 +1,38 @@
-from datetime import datetime
-
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy.sql import func
 
 from app.database import Base
 
 
 class Device(Base):
+    """
+    IP台帳に登録する機器情報のテーブル定義
+    """
+
+    # PostgreSQL上のテーブル名
     __tablename__ = "devices"
 
+    # 主キー
     id = Column(Integer, primary_key=True, index=True)
 
-    ip_address = Column(String(64), unique=True, nullable=False, index=True)
-    mac_address = Column(String(64), nullable=True)
-    hostname = Column(String(255), nullable=True)
+    # ホスト名・機器名
+    hostname = Column(String(255), nullable=False)
 
-    location = Column(String(255), nullable=True)
-    device_type = Column(String(255), nullable=True)
-    description = Column(Text, nullable=True)
+    # IPアドレス
+    ip_address = Column(String(50), nullable=False, unique=True, index=True)
 
-    # alive / dead / unknown
-    status = Column(String(50), nullable=False, default="unknown")
+    # サブネット
+    subnet = Column(String(100), nullable=True)
 
-    # confirmed / unconfirmed
-    confirm_status = Column(String(50), nullable=False, default="confirmed")
+    # 機器種別
+    # 例: router, switch, server, pc, unknown
+    role = Column(String(100), nullable=True)
 
-    # manual / scan / import
-    source = Column(String(50), nullable=False, default="manual")
+    # メモ
+    memo = Column(Text, nullable=True)
 
-    # Zabbix / SYSLOG連携用
-    zabbix_hostid = Column(String(128), nullable=True)
-    syslog_hostname = Column(String(255), nullable=True)
+    # 作成日時
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    monitor_enabled = Column(Boolean, nullable=False, default=True)
-    syslog_enabled = Column(Boolean, nullable=False, default=True)
-
-    first_seen_at = Column(DateTime, nullable=True)
-    last_seen_at = Column(DateTime, nullable=True)
-
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
-        DateTime,
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
+    # 更新日時
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

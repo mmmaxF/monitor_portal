@@ -1,135 +1,298 @@
-from datetime import datetime
+import csv
+import io
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Device
 
-router = APIRouter(prefix="/api/devices", tags=["devices"])
 
+# /devices から始まるAPIをまとめるルーター
+router = APIRouter(
+    prefix="/devices",
+    tags=["devices"]
+)
+
+
+# =========================
+# リクエスト・レスポンス定義
+# =========================
 
 class DeviceCreate(BaseModel):
+    """
+    機器を新規登録するときに受け取るデータ
+    """
+    hostname: str
     ip_address: str
-    mac_address: Optional[str] = None
-    hostname: Optional[str] = None
-    location: Optional[str] = None
-    device_type: Optional[str] = None
-    description: Optional[str] = None
-    monitor_enabled: bool = True
-    syslog_enabled: bool = True
+    subnet: Optional[str] = None
+    role: Optional[str] = None
+    memo: Optional[str] = None
 
 
 class DeviceUpdate(BaseModel):
-    ip_address: Optional[str] = None
-    mac_address: Optional[str] = None
+    """
+    機器情報を更新するときに受け取るデータ
+
+    Optional にしているので、
+    更新したい項目だけ送ればよい
+    """
     hostname: Optional[str] = None
-    location: Optional[str] = None
-    device_type: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[str] = None
-    confirm_status: Optional[str] = None
-    source: Optional[str] = None
-    zabbix_hostid: Optional[str] = None
-    syslog_hostname: Optional[str] = None
-    monitor_enabled: Optional[bool] = None
-    syslog_enabled: Optional[bool] = None
+    ip_address: Optional[str] = None
+    subnet: Optional[str] = None
+    role: Optional[str] = None
+    memo: Optional[str] = None
 
 
 class DeviceResponse(BaseModel):
+    """
+    APIレスポンスとして返すデータ
+    """
     id: int
+    hostname: str
     ip_address: str
-    mac_address: Optional[str]
-    hostname: Optional[str]
-    location: Optional[str]
-    device_type: Optional[str]
-    description: Optional[str]
-    status: str
-    confirm_status: str
-    source: str
-    monitor_enabled: bool
-    syslog_enabled: bool
-    created_at: datetime
-    updated_at: datetime
+    subnet: Optional[str] = None
+    role: Optional[str] = None
+    memo: Optional[str] = None
 
     class Config:
+        # SQLAlchemyモデルをPydanticレスポンスに変換できるようにする
         from_attributes = True
 
 
-@router.get("", response_model=list[DeviceResponse])
-def list_devices(db: Session = Depends(get_db)):
-    return db.query(Device).order_by(Device.ip_address.asc()).all()
+# =========================
+# 共通処理
+# =========================
 
-
-@router.get("/{device_id}", response_model=DeviceResponse)
-def get_device(device_id: int, db: Session = Depends(get_db)):
+def get_device_or_404(device_id: int, db: Session) -> Device:
+    """
+    指定されたIDの機器を取得する共通関数
+    見つからない場合は404エラーを返す
+    """
     device = db.query(Device).filter(Device.id == device_id).first()
 
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Device not found."
+        )
 
     return device
 
 
-@router.post("", response_model=DeviceResponse)
-def create_device(payload: DeviceCreate, db: Session = Depends(get_db)):
-    exists = db.query(Device).filter(Device.ip_address == payload.ip_address).first()
+# =========================
+# API本体
+# =========================
 
-    if exists:
-        raise HTTPException(status_code=400, detail="IP address already exists")
+@router.get("/", response_model=list[DeviceResponse])
+def list_devices(
+    hostname: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    subnet: Optional[str] = None,
+    role: Optional[str] = None,
+    keyword: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    IP台帳に登録されている機器一覧を取得するAPI
+    検索条件を指定すると、条件に合う機器だけを返す。
+    検索例:
+    - /devices/
+    - /devices/?hostname=switch
+    - /devices/?ip_address=10.100
+    - /devices/?subnet=10.100.0.0/24
+    - /devices/?role=switch
+    - /devices/?keyword=test
+    """
 
-    now = datetime.utcnow()
+    query = db.query(Device)
 
-    device = Device(
-        ip_address=payload.ip_address,
-        mac_address=payload.mac_address,
-        hostname=payload.hostname,
-        location=payload.location,
-        device_type=payload.device_type,
-        description=payload.description,
-        status="unknown",
-        confirm_status="confirmed",
-        source="manual",
-        monitor_enabled=payload.monitor_enabled,
-        syslog_enabled=payload.syslog_enabled,
-        created_at=now,
-        updated_at=now,
+    # ホスト名で部分一致検索
+    if hostname:
+        query = query.filter(Device.hostname.ilike(f"%{hostname}%"))
+
+    # IPアドレスで部分一致検索
+    if ip_address:
+        query = query.filter(Device.ip_address.ilike(f"%{ip_address}%"))
+
+    # サブネットで部分一致検索
+    if subnet:
+        query = query.filter(Device.subnet.ilike(f"%{subnet}%"))
+
+    # ロールで部分一致検索
+    if role:
+        query = query.filter(Device.role.ilike(f"%{role}%"))
+
+    # キーワード検索
+    # hostname / ip_address / subnet / role / memo のどれかに一致すれば返す
+    if keyword:
+        from sqlalchemy import or_
+
+        query = query.filter(
+            or_(
+                Device.hostname.ilike(f"%{keyword}%"),
+                Device.ip_address.ilike(f"%{keyword}%"),
+                Device.subnet.ilike(f"%{keyword}%"),
+                Device.role.ilike(f"%{keyword}%"),
+                Device.memo.ilike(f"%{keyword}%"),
+            )
+        )
+
+    devices = query.order_by(Device.id.asc()).all()
+
+    return devices
+
+
+@router.post("/", response_model=DeviceResponse)
+def create_device(device: DeviceCreate, db: Session = Depends(get_db)):
+    """
+    IP台帳に機器を1件登録するAPI
+    """
+
+    # 同じIPアドレスがすでに登録されていないか確認
+    existing_device = db.query(Device).filter(
+        Device.ip_address == device.ip_address
+    ).first()
+
+    if existing_device:
+        raise HTTPException(
+            status_code=400,
+            detail="This IP address is already registered."
+        )
+
+    # DBに保存するDeviceオブジェクトを作成
+    new_device = Device(
+        hostname=device.hostname,
+        ip_address=device.ip_address,
+        subnet=device.subnet,
+        role=device.role,
+        memo=device.memo
     )
 
-    db.add(device)
+    # DBへ追加
+    db.add(new_device)
+
+    # 変更を確定
     db.commit()
-    db.refresh(device)
+
+    # DB側で採番された id などを再読み込み
+    db.refresh(new_device)
+
+    return new_device
+
+
+@router.get("/export-csv")
+def export_devices_csv(db: Session = Depends(get_db)):
+    """
+    IP台帳に登録されている機器一覧をCSVで出力するAPI
+
+    Excelで直接開いても文字化けしにくいように、
+    日本語Windows向けの CP932 / Shift_JIS で出力する。
+    """
+
+    devices = db.query(Device).order_by(Device.id.asc()).all()
+
+    # まず文字列としてCSVを作成
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "id",
+        "hostname",
+        "ip_address",
+        "subnet",
+        "role",
+        "memo",
+        "created_at",
+        "updated_at"
+    ])
+
+    for device in devices:
+        writer.writerow([
+            device.id,
+            device.hostname,
+            device.ip_address,
+            device.subnet or "",
+            device.role or "",
+            device.memo or "",
+            device.created_at.isoformat() if device.created_at else "",
+            device.updated_at.isoformat() if device.updated_at else "",
+        ])
+
+    # CSV文字列をCP932でバイト列に変換
+    csv_bytes = output.getvalue().encode("cp932", errors="replace")
+
+    # バイト列として返す
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=shift_jis",
+        headers={
+            "Content-Disposition": "attachment; filename=devices.csv"
+        }
+    )
+
+
+
+@router.get("/{device_id}", response_model=DeviceResponse)
+def get_device(device_id: int, db: Session = Depends(get_db)):
+    """
+    指定したIDの機器情報を1件取得するAPI
+    """
+
+    device = get_device_or_404(device_id, db)
 
     return device
 
 
 @router.put("/{device_id}", response_model=DeviceResponse)
-def update_device(device_id: int, payload: DeviceUpdate, db: Session = Depends(get_db)):
-    device = db.query(Device).filter(Device.id == device_id).first()
+def update_device(
+    device_id: int,
+    update_data: DeviceUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    指定したIDの機器情報を更新するAPI
+    """
 
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+    # 更新対象の機器を取得
+    device = get_device_or_404(device_id, db)
 
-    data = payload.model_dump(exclude_unset=True)
+    # IPアドレスを変更する場合、同じIPが他の機器で使われていないか確認
+    if update_data.ip_address is not None and update_data.ip_address != device.ip_address:
+        existing_device = db.query(Device).filter(
+            Device.ip_address == update_data.ip_address
+        ).first()
 
-    if "ip_address" in data:
-        exists = (
-            db.query(Device)
-            .filter(Device.ip_address == data["ip_address"], Device.id != device_id)
-            .first()
-        )
+        if existing_device:
+            raise HTTPException(
+                status_code=400,
+                detail="This IP address is already registered."
+            )
 
-        if exists:
-            raise HTTPException(status_code=400, detail="IP address already exists")
+    # 送られてきた項目だけ更新する
+    if update_data.hostname is not None:
+        device.hostname = update_data.hostname
 
-    for key, value in data.items():
-        setattr(device, key, value)
+    if update_data.ip_address is not None:
+        device.ip_address = update_data.ip_address
 
-    device.updated_at = datetime.utcnow()
+    if update_data.subnet is not None:
+        device.subnet = update_data.subnet
 
+    if update_data.role is not None:
+        device.role = update_data.role
+
+    if update_data.memo is not None:
+        device.memo = update_data.memo
+
+    # 変更を確定
     db.commit()
+
+    # 更新後の内容を再読み込み
     db.refresh(device)
 
     return device
@@ -137,28 +300,142 @@ def update_device(device_id: int, payload: DeviceUpdate, db: Session = Depends(g
 
 @router.delete("/{device_id}")
 def delete_device(device_id: int, db: Session = Depends(get_db)):
-    device = db.query(Device).filter(Device.id == device_id).first()
+    """
+    指定したIDの機器情報を削除するAPI
+    """
 
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+    # 削除対象の機器を取得
+    device = get_device_or_404(device_id, db)
 
+    # DBから削除
     db.delete(device)
+
+    # 変更を確定
     db.commit()
 
-    return {"message": "deleted"}
+    return {
+        "message": "Device deleted successfully.",
+        "deleted_id": device_id
+    }
 
 
-@router.post("/{device_id}/confirm", response_model=DeviceResponse)
-def confirm_device(device_id: int, db: Session = Depends(get_db)):
-    device = db.query(Device).filter(Device.id == device_id).first()
 
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+@router.post("/import-csv")
+async def import_devices_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    CSVファイルからIP台帳データを一括登録・更新するAPI
 
-    device.confirm_status = "confirmed"
-    device.updated_at = datetime.utcnow()
+    CSV列:
+    - hostname
+    - ip_address
+    - subnet
+    - role
+    - memo
 
+    動作:
+    - ip_address が未登録なら新規追加
+    - ip_address が既存なら hostname / subnet / role / memo を更新
+    """
+
+    # CSVファイルか簡易チェック
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(
+            status_code=400,
+            detail="CSVファイルをアップロードしてください。"
+        )
+
+    # アップロードされたファイルを読み込み
+    content = await file.read()
+
+    # UTF-8 BOM付きCSVにも対応
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="CSVの文字コードはUTF-8で保存してください。"
+        )
+
+    # CSVを辞書形式で読み込む
+    csv_file = io.StringIO(text)
+    reader = csv.DictReader(csv_file)
+
+    required_columns = {"hostname", "ip_address"}
+
+    # ヘッダー確認
+    if not reader.fieldnames:
+        raise HTTPException(
+            status_code=400,
+            detail="CSVヘッダーが見つかりません。"
+        )
+
+    missing_columns = required_columns - set(reader.fieldnames)
+
+    if missing_columns:
+        raise HTTPException(
+            status_code=400,
+            detail=f"必須列が不足しています: {', '.join(missing_columns)}"
+        )
+
+    created_count = 0
+    updated_count = 0
+    skipped_count = 0
+    errors = []
+
+    for row_number, row in enumerate(reader, start=2):
+        hostname = (row.get("hostname") or "").strip()
+        ip_address = (row.get("ip_address") or "").strip()
+        subnet = (row.get("subnet") or "").strip() or None
+        role = (row.get("role") or "").strip() or None
+        memo = (row.get("memo") or "").strip() or None
+
+        # 必須項目チェック
+        if not hostname or not ip_address:
+            skipped_count += 1
+            errors.append({
+                "row": row_number,
+                "reason": "hostname または ip_address が空です。"
+            })
+            continue
+
+        # 同じIPアドレスの機器があるか確認
+        existing_device = db.query(Device).filter(
+            Device.ip_address == ip_address
+        ).first()
+
+        if existing_device:
+            # 既存IPなら更新
+            existing_device.hostname = hostname
+            existing_device.subnet = subnet
+            existing_device.role = role
+            existing_device.memo = memo
+            updated_count += 1
+        else:
+            # 未登録IPなら新規追加
+            new_device = Device(
+                hostname=hostname,
+                ip_address=ip_address,
+                subnet=subnet,
+                role=role,
+                memo=memo
+            )
+            db.add(new_device)
+            created_count += 1
+
+    # DBへ反映
     db.commit()
-    db.refresh(device)
 
-    return device
+    return {
+        "message": "CSV import completed.",
+        "created_count": created_count,
+        "updated_count": updated_count,
+        "skipped_count": skipped_count,
+        "errors": errors
+    }
+
+
+
+
